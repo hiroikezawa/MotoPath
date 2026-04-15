@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import Combine
 import CoreLocation
 import CoreData
 import os.log
@@ -19,39 +20,96 @@ final class LocationRecorder: NSObject, ObservableObject {
     private let log = Logger(subsystem: Bundle.main.bundleIdentifier ?? "MotoPath", category: "LocationRecorder")
 
     // configuration
-    private let desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyBest
+    private let desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyBestForNavigation
     private let distanceFilter: CLLocationDistance = 25 // meters
     private let minRecordInterval: TimeInterval = 30 // seconds
 
     private var lastSavedAt: Date?
+    @Published private(set) var currentLocation: CLLocation?
 
     override init() {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = desiredAccuracy
         manager.distanceFilter = distanceFilter
-        manager.allowsBackgroundLocationUpdates = true
-        manager.pausesLocationUpdatesAutomatically = true
-        manager.showsBackgroundLocationIndicator = true
+        manager.activityType = .automotiveNavigation
+        manager.allowsBackgroundLocationUpdates = false
+        manager.pausesLocationUpdatesAutomatically = false
+        manager.showsBackgroundLocationIndicator = false
     }
 
+    var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
+
     func requestAuthorization() {
-        if manager.authorizationStatus == .notDetermined {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            // iOS 推奨フロー: まず WhenInUse を求める
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            // バックグラウンド継続のために Always を追加でリクエスト
             manager.requestAlwaysAuthorization()
-        } else if manager.authorizationStatus == .authorizedWhenInUse {
-            manager.requestAlwaysAuthorization()
+        case .authorizedAlways:
+            startForegroundAndBackground()
+        case .restricted, .denied:
+            // ここでは何もしない（設定アプリでの変更を促すなどは UI 側で）
+            break
+        @unknown default:
+            break
         }
     }
 
-    func start() {
-        // Combine significant changes and standard updates to balance power and fidelity
-        manager.startMonitoringSignificantLocationChanges()
+    private func startForeground() {
+        log.debug("startForeground() called")
+        guard CLLocationManager.locationServicesEnabled() else {
+            log.error("Location services disabled")
+            return
+        }
+        manager.allowsBackgroundLocationUpdates = false
+        manager.showsBackgroundLocationIndicator = false
+        manager.pausesLocationUpdatesAutomatically = false
+
         manager.startUpdatingLocation()
+        manager.requestLocation()
+    }
+
+    private func startForegroundAndBackground() {
+        log.debug("startForegroundAndBackground() called")
+        guard CLLocationManager.locationServicesEnabled() else {
+            log.error("Location services disabled")
+            return
+        }
+        // Note: Do NOT use significant-change monitoring here to avoid relaunching the app when it's not running.
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
+        manager.pausesLocationUpdatesAutomatically = false
+
+        manager.startUpdatingLocation()
+        manager.requestLocation()
+    }
+
+    /// Public entry point to start recording based on current authorization state.
+    /// - If not determined, requests WhenInUse (and later Always).
+    /// - If WhenInUse, starts foreground updates and requests Always.
+    /// - If Always, starts both foreground and background updates.
+    func start() {
+        switch manager.authorizationStatus {
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        case .authorizedWhenInUse:
+            startForeground()
+            manager.requestAlwaysAuthorization()
+        case .authorizedAlways:
+            startForegroundAndBackground()
+        case .restricted, .denied:
+            // Do nothing; UI can prompt user to change settings
+            break
+        @unknown default:
+            break
+        }
     }
 
     func stop() {
         manager.stopUpdatingLocation()
-        manager.stopMonitoringSignificantLocationChanges()
     }
 
     private func save(location: CLLocation) {
@@ -79,11 +137,15 @@ final class LocationRecorder: NSObject, ObservableObject {
 
 extension LocationRecorder: CLLocationManagerDelegate {
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        log.debug("Authorization changed: \(String(describing: manager.authorizationStatus))")
         switch manager.authorizationStatus {
         case .authorizedAlways:
-            start()
+            startForegroundAndBackground() // Start with foreground + background capabilities
+            manager.requestLocation()
         case .authorizedWhenInUse:
-            // encourage Always for background
+            // Start foreground updates immediately, then request Always for background support
+            startForeground()
+            manager.requestLocation()
             manager.requestAlwaysAuthorization()
         case .denied, .restricted:
             stop()
@@ -96,6 +158,7 @@ extension LocationRecorder: CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let latest = locations.last else { return }
+        currentLocation = latest
         save(location: latest)
     }
 
@@ -103,3 +166,4 @@ extension LocationRecorder: CLLocationManagerDelegate {
         log.error("CLLocationManager error: \(error.localizedDescription)")
     }
 }
+
