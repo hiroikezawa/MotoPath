@@ -1,0 +1,12 @@
+Add the following to your Info.plist and Capabilities:
+
+Info.plist Keys:
+- NSLocationWhenInUseUsageDescription: "移動ルートの記録のため、アプリ使用中の位置情報を利用します。"
+- NSLocationAlwaysAndWhenInUseUsageDescription: "バックグラウンドでも移動ルートを記録するため、常に位置情報を利用します。"
+- NSLocationAlwaysUsageDescription: "バックグラウンドでも移動ルートを記録するため、常に位置情報を利用します。" (for older iOS)
+
+Capabilities > Background Modes:
+- Location updates (required)
+- Background fetch (optional)
+
+Note: Also enable 'Location updates' background mode and ensure the project has the 'Required background modes' key with 'App registers for location updates'.
