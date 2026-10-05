@@ -2,6 +2,10 @@
 
 MotoPath は、移動した道のりを日付ごとに地図で振り返るための iPhone アプリです。記録と閲覧に必要な機能に絞った、シンプルで軽量な構成です。
 
+## アプリ画面
+
+<img src="docs/images/motopath-route.png" alt="MotoPath で記録した移動ルートの画面" width="360">
+
 ## できること
 
 - 位置情報から移動ルートを自動で記録
